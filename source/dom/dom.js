@@ -9,18 +9,19 @@ enyo.requiresWindow = function(inFunction) {
 
 enyo.dom = {
 	/**
-		
-		Shortcut for _document.getElementById_ if _id_ is a string, otherwise returns _id_. Uses _window.document_ unless a document is specified in the (optional) _doc_ parameter.
+		Shortcut for _document.getElementById_ if _id_ is a string, otherwise returns _id_. 
+		Uses _window.document_ unless a document is specified in the (optional) _doc_
+		parameter.
 
 			// find 'node' if it's a string id, or return it unchanged if it's already a node reference
-			var domNode = enyo.byId(node);
+			var domNode = enyo.dom.byId(node);
 	*/
 	byId: function(id, doc){
 		return (typeof id == "string") ? (doc || document).getElementById(id) : id; 
 	},
 	/**
-		return string with ampersand, less-than, and greater-than characters replaced with HTML entities, 
-		e.g. 
+		return string with ampersand, less-than, and greater-than characters
+		replaced with HTML entities, e.g. 
 
 			'&lt;code&gt;"This &amp; That"&lt;/code&gt;' 
 
@@ -67,6 +68,20 @@ enyo.dom = {
 			return document.documentElement.offsetWidth;
 		}
 		return 320;
+	},
+	getWindowHeight: function() {
+		if (window.innerHeight) {
+			return window.innerHeight;
+		}
+		if (document.body && document.body.offsetHeight) {
+			return document.body.offsetHeight;
+		}
+		if (document.compatMode=='CSS1Compat' &&
+			document.documentElement &&
+			document.documentElement.offsetHeight ) {
+			return document.documentElement.offsetHeight;
+		}
+		return 480;
 	},
 	// moved from FittableLayout.js into common protected code
 	_ieCssToPixelValue: function(inNode, inValue) {
@@ -123,5 +138,38 @@ enyo.dom = {
 	//* Gets the calculated margin of a node.
 	calcMarginExtents: function(inNode) {
 		return this.calcBoxExtents(inNode, "margin");
+	},
+	//* Returns an object like `{top: 0, left: 0, bottom: 100, right: 100, height: 10, width: 10}` that represents the object's position within the viewport. Negative values mean part of the object is not visible.
+	calcViewportPositionForNode: function(inNode) {
+		// Parse upward and grab our positioning relative to the viewport
+		var left = top = 0,
+			node = inNode,
+			width = node.offsetWidth,
+			height = node.offsetHeight,
+			docHeight = (document.body.parentNode.offsetHeight > this.getWindowHeight() ? this.getWindowHeight() - document.body.parentNode.scrollTop : document.body.parentNode.offsetHeight),
+			docWidth = (document.body.parentNode.offsetWidth > this.getWindowWidth() ? this.getWindowWidth() - document.body.parentNode.scrollLeft : document.body.parentNode.offsetWidth),
+			transformProp = enyo.dom.getStyleTransformProp(),
+			xregex = /translateX\((-?\d+)px\)/i,
+			yregex = /translateY\((-?\d+)px\)/i;
+		if (node.offsetParent) {
+			do {
+				left += node.offsetLeft - (node.offsetParent ? node.offsetParent.scrollLeft : 0);
+				if (transformProp && xregex.test(node.style[transformProp])) {
+					left += parseInt(node.style[transformProp].replace(xregex, '$1'));
+				}
+				top += node.offsetTop - (node.offsetParent ? node.offsetParent.scrollTop : 0);
+				if (transformProp && yregex.test(node.style[transformProp])) {
+					top += parseInt(node.style[transformProp].replace(yregex, '$1'));
+				}
+			} while (node = node.offsetParent);
+		}
+		return {
+			'top': top,
+			'left': left,
+			'bottom': docHeight - top - height,
+			'right': docWidth - left - width,
+			'height': height,
+			'width': width
+		};
 	}
 };
