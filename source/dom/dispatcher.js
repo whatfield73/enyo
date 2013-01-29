@@ -3,12 +3,12 @@ enyo.$ = {};
 
 enyo.dispatcher = {
 	// these events come from document
-	events: ["mousedown", "mouseup", "mouseover", "mouseout", "mousemove", "mousewheel", 
+	events: ["mousedown", "mouseup", "mouseover", "mouseout", "mousemove", "mousewheel",
 		"click", "dblclick", "change", "keydown", "keyup", "keypress", "input"],
 	// these events come from window
 	windowEvents: ["resize", "load", "unload", "message"],
 	// these events come from css
-	cssEvents: ["webkitTransitionEnd"],
+	cssEvents: ["webkitTransitionEnd", "transitionend"],
 	// feature plugins (aka filters)
 	features: [],
 	connect: function() {
@@ -16,9 +16,12 @@ enyo.dispatcher = {
 		for (i=0; (n=d.events[i]); i++) {
 			d.listen(document, n);
 		}
+		for (i=0; (n=d.cssEvents[i]); i++) {
+			d.listen(document, n);
+		}
 		for (i=0; (n=d.windowEvents[i]); i++) {
 			// Chrome Packaged Apps don't like "unload"
-			if(n === "unload" && 
+			if(n === "unload" &&
 				(typeof window.chrome === "object") &&
 				window.chrome.app) {
 				continue;
@@ -99,7 +102,12 @@ enyo.dispatcher = {
 
 // called in the context of an event
 enyo.iePreventDefault = function() {
-	this.returnValue = false;
+	try {
+		this.returnValue = false;
+	}
+	catch(e) {
+		// do nothing
+	}
 };
 
 enyo.dispatch = function(inEvent) {
