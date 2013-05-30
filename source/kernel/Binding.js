@@ -52,7 +52,7 @@
 			}
 		}
 	};
-	
+
 	//*@protected
 	/**
 		Used by the binding's setter for both targets and sources
@@ -135,7 +135,9 @@
 		var source = this.setupSource();
 		var target = this.setupTarget();
 		var refreshing = this._refreshing;
-		if (!this._registered) register(this);
+		if (!this._registered) {
+			register(this);
+		}
 		// setup the transform if we can
 		if (true !== refreshing) {
 			this.setupTransform();
@@ -275,7 +277,7 @@
 
 		//*@protected
 		_refreshing: false,
-		
+
 		//*@protected
 		_registered: false,
 
@@ -300,6 +302,16 @@
 			this._refreshing = true;
 			setup.call(this);
 			this._refreshing = false;
+		},
+
+		//*@protected
+		rebuild: function() {
+			this.disconnect();
+			this.source = null;
+			this._source_property = null;
+			this.target = null;
+			this._target_property = null;
+			this.refresh();
 		},
 
 		//*@public

@@ -1,9 +1,9 @@
 (function (enyo) {
-	
+
 	//*@public
 	/**
-		This binding will type-cast any truthy | falsey value
-		to an explicit boolean value.
+		_enyo.BooleanBinding_ is a binding that will type-cast any truthy or falsey
+		value to an explicit boolean value.
 	*/
 	enyo.kind({
 
@@ -25,5 +25,5 @@
 		}
 
 	});
-	
+
 })(enyo);

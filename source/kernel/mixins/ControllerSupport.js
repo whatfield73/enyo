@@ -26,7 +26,9 @@ enyo.createMixin({
 
 	//*@protected
 	create: function () {
-		this.notifyObservers("controller");
+		if (this.controller) {
+			this.notifyObservers("controller");
+		}
 	},
 
 	//*protected
@@ -40,16 +42,23 @@ enyo.createMixin({
 	},
 
 	//*@protected
-	_controller_changed: enyo.observer(function () {
+	_controller_changed: enyo.observer(function (property, previous, value) {
+		if (previous && value && previous === value) {
+			// seems to be the same controller we already had
+			return;
+		}
 		// first attempt to find the controller from the
 		// information we've been handed
-		this.findAndInstance("controller");
+		if (this.controller) {
+			this.findAndInstance("controller");
+		}
 	}, "controller"),
 
 	//*@protected
 	controllerFindAndInstance: function (ctor, inst) {
 		// if there is no constructor or instance it was not found
 		if (!(ctor || inst)) {
+			enyo.error("cannot find controller: " + this.controller);
 			return;
 		}
 		// if a constructor exists we instanced the class and can
@@ -61,16 +70,28 @@ enyo.createMixin({
 		else {
 			inst.addDispatchTarget(this);
 		}
-		// either way we need to refresh our bindings
-		this.refreshBindings();
+		// we rebuild (rather than refresh) our bindings because
+		// they are now most likely connected to the previous controller.
+		// TODO: Avoid rebuilding bindings to objects other than the controller?
+		this.rebuildBindings();
 	},
 
 	//*@protected
 	dispatchEvent: function (name, event, sender) {
 		// if we have a controller attempt to dispatch the event there
 		// and if it returns true, stop the dispatch
-		if (this.controller && this.controller.dispatchEvent(name, event, sender)) {
-			return true;
+		if (this.controller && this.controller._is_controller) {
+			if (this.controller.dispatchEvent(name, event, sender)) {
+				return true;
+			}
+			// this scenario is handled completely in the inherited method
+			// here we simply want to make sure that the controller has an
+			// opportunity to deal with the remapped event
+			if (this[name] && "string" === typeof this[name]) {
+				if (this.controller.dispatchEvent(this[name], event, sender)) {
+					return true;
+				}
+			}
 		}
 		return this.inherited(arguments);
 	},
