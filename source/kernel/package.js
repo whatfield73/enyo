@@ -13,8 +13,7 @@ enyo.depends(
 	"Signals.js",
 	"Controller.js",
 	"Router.js",
-	"ArrayController.js",
 	"ViewController.js",
 	"Application.js",
-	"ObjectController.js"
+	"data"
 );
