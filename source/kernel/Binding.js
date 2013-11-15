@@ -1,678 +1,567 @@
-(function () {
-
-	// add bindings to the automatically concatenatable properties in enyo
-	enyo.concat.push("bindings");
+(function (enyo) {
 
 	//*@protected
-	/**
-		Used internally to track bindings.
-	*/
-	var map = {};
-
-	//*@protected
-	/**
-		Used internally to track references to bindings to allow for
-		several different events to occur that will still cleanup
-		bindings.
-	*/
-	var register = function (binding) {
-		map[binding.id] = binding;
-		binding._registered = true;
-	};
-
-	//*@protected
-	/**
-		Used internally to remove references to bindings.
-	*/
-	var unregister = function (id) {
-		id = id && id.id? id.id: id;
-		if (map[id]) {
-			delete map[id];
-		}
-	};
-
-	//*@protected
-	var count = 0;
-
-	//*@protected
-	/**
-		Used internally as part of the getParts method.
-	*/
-	var fromRoot = function (root, parts) {
-		// check to see if the part of the path is relative to the root
-		var piece = root[(parts || [])[0]];
-		// if the root here is enyo.global then we need to ensure that
-		// the piece is actually an object
-		// this is very, very important
-		if (enyo.exists(piece)) {
-			if (enyo.global === root) {
-				return "object" === typeof piece? root: undefined;
-			} else {
-				return root;
-			}
-		}
-	};
-
-	//*@protected
+	// The internal store for bindings so they can be found by id later
+	var _bindingMap = {},
 	/**
 		Used by the binding's setter for both targets and sources
 		when determing whether or not to force a notification to fire.
 		We cannot easily determine this for types that are passed
-		by reference (e.g. arrays and native JavaScript objects). But
-		for these types it much clearer in nearly all cases.
+		by reference (e.g., arrays and native JavaScript objects). But
+		for these types it is much clearer in nearly all cases.
 	*/
-	var _force_regex = /(string|number|boolean)/;
-
-	//*@protected
+	_force = /(string|number|boolean)/;
 	/**
-		Used internally to determine from the given information what the
-		source and target paths and properties are. There is one exception case
-		between determining parts for the source and the target in bindings so
-		the optional third parameter helps it to use the correct algorithm.
+		For tracking purposes we count bindings.
 	*/
-	var getParts = function (path, context) {
-		/* jshint debug: true */
-		if (this.debug) {
-			debugger;
-		}
-		var parts;
-		var idx = 0;
-		var ret = {};
-		var root;
-		var cur;
-		var prop;
-		var base;
-		var part;
-		var owner = this.owner;
-		var local = path[0] === "."? true: false;
-		path = path[0] === "."? path.slice(1): path;
-		parts = path.split(".");
-		root = local? context || owner: context || fromRoot(enyo.global, parts) || owner;
-		base = root;
-		ret.property = prop = parts.length > 1? parts.pop(): path;
-		if (prop === path || (!local && context)) {
-			ret.base = base;
-		} else {
-			cur = base;
-			for (; idx < parts.length; ++idx) {
-				part = parts[idx];
-				if (!part) {
-					continue;
-				}
-				cur = cur[part];
-				if (!cur || "string" === typeof cur) {
-					if (part !== prop) {
-						ret.base = null;
-					}
-					return ret;
-				}
-			}
-			if (part !== path) {
-				base = cur;
-			}
-			ret.base = base;
-		}
-		return ret;
-	};
-
-	//*@protected
-	/**
-		Initially called during construction to setup the properties
-		of the binding appropriately exiting on specific conditions
-		silently if the target or source could not be properly
-		determined or found.
-	*/
-	var setup = function () {
-		/* jshint debug: true */
-		var debug = this.debug;
-		// for browsers that support this kind of debugging
-		if (true === debug) {
-			debugger;
-		}
-		// register the binding globally for cleanup purposes
-		var connect = this.autoConnect;
-		var sync = this.autoSync;
-		var source = this.setupSource();
-		var target = this.setupTarget();
-		var refreshing = this._refreshing;
-		if (!this._registered) {
-			register(this);
-		}
-		// setup the transform if we can
-		if (true !== refreshing) {
-			this.setupTransform();
-		}
-		// if we are refreshing and cannot find
-		// one of these parts we need to reset the targets
-		// value if possible (happens frequently in proxy/model-
-		// controllers who's model has been set to null)
-		if (!(source && target)) {
-			if (refreshing) {
-				if (target) {
-					// set the target's value to null to let
-					// it know we can't sync the real value from
-					// the source
-					this.setTargetValue(null);
-				}
-			}
-			return;
-		}
-		// this will fail silently if setup went aury for
-		// either the target or source
-		// we allow the process of connecting the ends to be
-		// interrupted if either end has been destroyed, we
-		// self-destruct
-		try {
-			if (connect || refreshing) {
-				this.connect();
-			}
-		} catch (err) {
-			if ("binding-destroyed" === err) {
-				return;
-			}
-			else {
-				throw err;
-			}
-		}
-		if (sync || refreshing) {
-			this.sync();
-		}
-	};
-
-	//*@protected
-	function Transform (fn, binding) {
-		this.transformer = fn;
-		this.binding = binding;
-	}
-
-	//*@protected
-	Transform.prototype = {
-		transform: function (value, direction) {
-			var fn = this.transformer;
-			var binding = this.binding;
-			var context = binding.owner || enyo.global;
-			return fn.call(context, value, direction, binding);
-		},
-		destroy: function () {
-			this.transformer = null;
-			this.binding = null;
-		}
-	};
+	enyo.BindingCount = 0;
 
 	//*@public
+	/**
+		_enyo.Binding_ is a mechanism used to keep properties synchronized. A
+		binding may be used to link two properties on different objects, or even two
+		properties on the same object. Once a binding has been established, it will
+		wait for change notifications; when a notification arrives, the binding will
+		synchronize the value between the two ends. Note that bindings may be
+		one-way (the default) or two-way.
+
+		Usually, you will not need to create _enyo.Binding_ objects arbitrarily, but
+		will instead rely on the public [BindingSupport
+		API](#enyo/source/kernel/mixins/BindingSupport.js), which is applied to
+		[enyo.Object](#enyo.Object) and so is available on all of its subkinds.
+	*/
 	enyo.kind({
-
-		// ...........................
-		// PUBLIC PROPERTIES
-
-		//*@public
 		name: "enyo.Binding",
-
-		//*@public
 		kind: null,
-
-		//*@public
+		noDefer: true,
+		/**
+			The _from_ property designates a path in which the property of the source
+			to bind from may be found. If the source is explicitly provided and the
+			path is relative (i.e., it begins with a "."), it is relative to the
+			source; otherwise, it is relative to the owner of the binding. To have a
+			binding be evaluated from the global scope, prefix the path with a "^". If
+			the source and the "^" are used in tandem, the "^" will be ignored and the
+			path will be assumed to be relative to the provided source.
+		*/
+		from: "",
+		/**
+			The _to_ property designates a path in which the property of the target to
+			bind from may be found. If the target is explicitly provided and the path
+			is relative (i.e., it begins with a "."), it is relative to the target;
+			otherwise, it is relative to the owner of the binding. To have a binding
+			be evaluated from the global scope, prefix the path with a "^". If the
+			target and the "^" are used in tandem, the "^" will be ignored and the
+			path will be assumed to be relative to the provided target.
+		*/
+		to: "",
+		/**
+			Set this only to a reference for an object to use as the source for the
+			binding. If this is not a bindable object, the source will be derived from
+			the _from_ property during initialization.
+		*/
 		source: null,
-
-		//*@public
+		/**
+			Set this only to a reference for an object to use as the target for the
+			binding. If this is not a bindable object, the target will be derived from
+			the _to_ property during initialization.
+		*/
 		target: null,
-
-		//*@public
-		to: null,
-
-		//*@public
-		from: null,
-
-		//*@public
-		autoConnect: true,
-
-		//*@public
-		autoSync: true,
-
-		//*@public
-		owner: null,
-
-		//*@public
-		transform: null,
-
-		//*@public
+		/**
+			Set this to a function or the name of a method on the owner of this
+			binding. A transform method is used to programmatically modify the value
+			being synchronized. The method will be executed with three parameters, the
+			_value_ being synchronized, the _direction_ (a string matching either
+			"source" or "target", as in "going to the source") and a reference to this
+			binding. In cases where the binding should be interrupted and not
+			propagate the synchronization at all, call the _stop()_ method of the
+			passed-in binding reference.
+		*/
+		transform: "",
+		/**
+			If the binding was able to resolve both ends (i.e., its _source_ and
+			_target_ objects), this boolean will be true. Setting this manually will
+			have undesirable effects.
+		*/
+		connected: false,
+		/**
+			Each binding has a unique id that can be used with the global static
+			method _enyo.Binding.find()_ to retrieve a reference to that binding. It
+			can also be used to track registered listeners on objects back to their
+			bindings.
+		*/
+		id: "",
+		/**
+			If a binding is one-way, this flag should be true (the default). If this
+			flag is set to false, the binding will be two-way.
+		*/
 		oneWay: true,
-
-		//*@public
-		twoWay: false,
-
-		//*@public
+		/**
+			By default, a binding will attempt to connect to both ends (_source_ and
+			_target_). If this process should be deferred, set this flag to false.
+		*/
+		autoConnect: true,
+		/**
+			By default, a binding will attempt to synchronize its values from its
+			_source_ to its	_target_. If this process should be deferred, set this
+			flag to false.
+		*/
+		autoSync: true,
+		/**
+			The _owner_ property is used extensively for various purposes within a
+			binding. One primary purpose is to serve as a root object from which to
+			search for its ends (the _source_ and/or _target_). If the owner created
+			the binding, it will also be responsible for destroying it
+			(automatically).
+		*/
+		owner: null,
+		/**
+			Boolean indicating whether this binding has been destroyed. Do not change
+			this flag arbitrarily.
+		*/
 		destroyed: false,
-
-		//*@public
-		debug: false,
-
-		//*@public
 		statics: {
+			/**
+				This method may be used to retrieve a binding by its id globally. Simply
+				pass in the known _id_ string. If the id is found, the method will
+				return a reference to the binding; otherwise, it will return
+				_undefined_.
+			*/
 			find: function (id) {
-				return map[id];
+				return _bindingMap[id];
 			}
 		},
-
-		// ...........................
-		// PROTECTED PROPERTIES
-
 		//*@protected
-		_source_property: null,
-
-		//*@protected
-		_target_property: null,
-
-		//*@protected
-		_source_responder: null,
-
-		//*@protected
-		_target_responder: null,
-
-		//*@protected
-		_is_connected: false,
-
-		//*@protected
-		_synchronizing: false,
-
-		//*@protected
-		_refreshing: false,
-
-		//*@protected
-		_registered: false,
-
-		// ...........................
-		// COMPUTED PROPERTIES
-
-		// ...........................
-		// PUBLIC METHODS
-
-		// ...........................
-		// PROTECTED METHODS
-
-		//*@protected
-		sync: function () {
-			if (true === this._is_connected) {
-				this.syncFromSource();
+		sourceObserver: null,
+		targetObserver: null,
+		sourceConnected: false,
+		targetConnected: false,
+		sourceRegistered: false,
+		targetRegistered: false,
+		registeredSource: null,
+		registeredTarget: null,
+		sourcePath: "",
+		targetPath: "",
+		sourceProp: "",
+		targetProp: "",
+		building: true,
+		//* Used internally to track the original values passed to the binding for rebuilding.
+		originals: null,
+		constructor: function (props) {
+			if (props) {
+				enyo.mixin(this, props);
 			}
-		},
-
-		//*@protected
-		refresh: function () {
-			this._refreshing = true;
-			setup.call(this);
-			this._refreshing = false;
-		},
-
-		//*@protected
-		rebuild: function() {
-			this.disconnect();
-			this.source = null;
-			this._source_property = null;
-			this.target = null;
-			this._target_property = null;
+			this.id = enyo.uid("binding");
+			_bindingMap[this.id]          = this;
+			// faster this way than calling mixin or only or any other helper/convenience
+			// method to do the same thing...
+			this.originals        = this.originals || {};
+			this.originals.from   = this.from;
+			this.originals.to     = this.to;
+			this.originals.source = this.source;
+			this.originals.target = this.target;
+			this.initTransform();
 			this.refresh();
+			enyo.BindingCount++;
 		},
-
-		//*@public
-		/**
-			Call this method to connect this binding to its
-			source (and target). This only registers the responders
-			but does not automatically synchronize the values.
-		*/
-		connect: function () {
-			if (true === this._is_connected) {
-				return;
+		isConnected: function () {
+			this.connected = (this.sourceConnected && this.targetConnected);
+			return this.connected;
+		},
+		registered: function (which, object) {
+			if (which == "source") {
+				this.sourceRegistered = true;
+				this.registeredSource = object;
+			} else if (which == "target") {
+				this.targetRegistered = true;
+				this.registeredTarget = object;
 			}
-			if (true === this.destroyed) {
-				return;
-			}
-			this.connectSource();
-			this.connectTarget();
-			if (this.sourceConnected && this.targetConnected) {
-				this._is_connected = true;
-			} else {
-				this._is_connected = false;
+			if (this.autoSync && this.isRegistered() && !this.synchronizing) {
+				this.sync();
 			}
 		},
-
-		//*@public
-		/**
-			Call this method to disconnect this binding from
-			its source (and target).
-		*/
-		disconnect: function () {
-			if (false === this._is_connected) {
-				return;
-			}
-			this.disconnectSource();
-			this.disconnectTarget();
-			this._is_connected = false;
+		isRegistered: function () {
+			return !! (this.sourceRegistered && this.targetRegistered);
 		},
-
-		//*@protected
-		setupSource: function () {
-			var parts;
-			var base;
-			var property = this._source_property;
-			var source = this.source;
-			var from = this.from;
-			if (source && property) {
-				return true;
-			}
-			if (!from) {
-				return false;
-			}
-			parts = getParts.call(this, from, source);
-			base = parts.base;
-			property = parts.property;
-			if (!base || "object" !== typeof base) {
-				return false;
-			}
-			this.source = base;
-			this._source_property = property;
-			return true;
-		},
-
-		//*@protected
-		setupTarget: function () {
-			var parts;
-			var base;
-			var property = this._target_property;
-			var target = this.target;
-			var to = this.to;
-			if (target && property) {
-				return true;
-			}
-			if (!to) {
-				return false;
-			}
-			parts = getParts.call(this, to, target);
-			base = parts.base;
-			property = parts.property;
-			if (!base || "object" !== typeof base) {
-				return false;
-			}
-			this.target = base;
-			this._target_property = property;
-			return true;
-		},
-
-		//*@protected
-		stop: function () {
-			throw "stop-binding";
-		},
-
-		//*@protected
-		connectSource: function () {
-			var source = this.source;
-			var property = this._source_property;
-			var fn = this._source_responder;
-			if (!(source instanceof enyo.Object)) {
-				this.sourceConnected = false;
-				return false;
-			}
-			// only create the responder if it doesn't already exist
-			if (!enyo.exists(fn) || "function" !== typeof fn) {
-				fn = enyo.bind(this, this.syncFromSource);
-				this._source_responder = fn;
-			}
-			// in the event that the source actually exists but has been destroyed
-			if (true === source.destroyed) {
-				// we need to be destroyed so we can also be cleaned up
-				this.destroy();
-				throw "binding-destroyed";
-			}
-			// if it is already connected don't do anything
-			if (true === this.sourceConnected) {
-				return true;
-			}
-			if (!enyo.exists(source)) {
-				this.sourceConnected = false;
-				return false;
-			}
-			// assign the binding's id to the responder for debugging
-			fn.bindingId = this.id;
-			// add the observer for the property on the source object
-			source.addObserver(property, fn);
-			this.sourceConnected = true;
-			return true;
-		},
-
-		//*@protected
-		connectTarget: function () {
-			var target = this.target;
-			var property = this._target_property;
-			var fn = this._target_responder;
-			var oneWay = this.oneWay;
-			if (!(target instanceof enyo.Object)) {
-				this.targetConnected = false;
-				return false;
-			}
-			// in the event that the target actually exists but has been destroyed
-			if (true === target.destroyed) {
-				// we need to be destroyed so we can also be cleaned up
-				this.destroy();
-				throw "binding-destroyed";
-			}
-			// if this is a one way binding there is nothing to do
-			if (true === oneWay) {
-				this.targetConnected = true;
-				return true;
-			}
-			// only create the responder if it doesn't already exist
-			if (!enyo.exists(fn) || "function" !== typeof fn) {
-				fn = enyo.bind(this, this.syncFromTarget);
-				this._target_responder = fn;
-			}
-			// if it is already connected don't do anything else
-			if (true === this.targetConnected) {
-				return true;
-			}
-			if (!enyo.exists(target)) {
-				this.targetConnected = false;
-				return false;
-			}
-			fn.bindingId = this.id;
-			target.addObserver(property, fn);
-			this.targetConnected = true;
-			return true;
-		},
-
-		//*@protected
 		syncFromSource: function () {
-			var twoWay = this.twoWay;
-			var value = this.getSourceValue();
-			var transformer = this.transform;
-			// if this is a two way binding we need to
-			// disconnect from the target first to ensure
-			// we don't catch the update response
-			// TODO: rethink this approach as try/catch are
-			// costly in general...
-			try {
-				value = transformer.transform(value, "source");
-			} catch (err) {
-				// the transform was interrupted, do not complete
-				if ("stop-binding" === err) {
-					return;
-				} else {
-					throw err;
+			this.synchronizing = true;
+			if (this.isConnected() && this.isRegistered()) {
+				var value = this.getSourceValue(),
+					fn    = this.transform;
+				if (fn && typeof fn == "function") {
+					value = fn.call(this.owner || this, value, "source", this);
 				}
+				if (value === undefined) {
+					return;
+				}
+				this.setTargetValue(value);		
 			}
-			if (twoWay) {
-				this._synchronizing = true;
-				this.disconnectTarget();
-			}
-			this.setTargetValue(value);
-			if (twoWay) {
-				this.connectTarget();
-				this._synchronizing = false;
-			}
+			this.synchronizing = false;
 		},
-
-		//*@protected
 		syncFromTarget: function () {
-			var value = this.getTargetValue();
-			var transformer = this.transform;
-			// TODO: same as for syncFromSource
-			try {
-				value = transformer.transform(value, "target");
-			} catch (err) {
-				// the transform was interrupted, do not complete
-				if ("stop-binding" === err) {
-					return;
+			if (!this.oneWay) {
+				this.synchronizing = true;
+				if (this.isConnected() && this.isRegistered()) {
+					var value = this.getTargetValue(),
+						fn    = this.transform;
+					if (fn && typeof fn == "function") {
+						value = fn.call(this.owner || this, value, "target", this);
+					}
+					if (value === undefined) {
+						return;
+					}
+					this.setSourceValue(value);
+				}
+				this.synchronizing = false;
+			}
+		},
+		resolve: function () {
+			var source = this.source,
+				target = this.target,
+				from   = this.from,
+				to     = this.to,
+				tp, sp;
+			// this allows empty bindings to be created
+			if (!from || !to) { return; }
+			// this is the first track and should only be reachable if the binding has not yet been
+			// built or it has been completely reset, on subsequent calls this path will be skipped
+			if (this.building) {
+				if (from[0] != "." && from[0] != "^") {
+					throw "enyo.Binding: from path must begin with `.` or `^`";
+				} else if (to[0] != "." && to[0] != "^") {
+					throw "enyo.Binding: to path must beging with `.` or `^`";
+				}
+				// both of the following scenarios should only happen if the to/from are relative
+				// if not they will fail later and this is intended as it is a logical fallacy to
+				// both supply the global flag and a source/target of any sort
+				if (typeof source == "string") {
+					if (source[0] != "." && source[0] != "^") {
+						throw "enyo.Binding: if source is a string it must begin with `.` or `^`";
+					}
+					from = ((source == "."? "": source) + from);
+					source = null;
+				}
+				if (typeof target == "string") {
+					if (target[0] != "." && target[0] != "^") {
+						throw "enyo.Binding: if target is a string it must begin with `.` or `^`";
+					}
+					to = ((target == "."? "": target) + to);
+					target = null;
+				}
+				// if we need to, infer the root paths
+				if (!source) {
+					this.source = source = (from[0] == "."? this.owner: enyo.global);
+				}
+				if (!target) {
+					this.target = target = (to[0]   == "."? this.owner: enyo.global);
+				}
+				// update our properties that will be used later for actually connecting the pieces
+				sp                        = from.slice(1).split(".");
+				tp                        = to  .slice(1).split(".");
+				// unfortunately special handling is required for cases where the object requested is
+				// actually a reference to a component in the `$` hash
+				var is                    = enyo.lastIndexOf(".", from);
+				var it                    = enyo.lastIndexOf(".", to);
+				this.sourcePath           = (from[0] == "^"? sp.slice(0, -1): sp).join(".");
+				this.targetPath           = (to[0] == "^"? tp.slice(0,-1): tp).join(".");
+				if (is > -1 && from[is-1] == "$") {
+					// this means that the final property we need to request is something on the
+					// hash directly and not a property of that object
+					this.sourceProp       = sp.slice(-2).join(".");
 				} else {
-					throw err;
+					this.sourceProp       = sp  .pop();
+				}
+				if (it > -1 && from[it-1] == "$") {
+					// same situation as for the source above
+					this.targetProp       = tp.slice(-2).join(".");
+				} else {
+					this.targetProp       = tp  .pop();
+				}
+				this.building             = false;
+			}
+			if (source === enyo.global) {
+				this.source       = enyo.getPath(this.sourcePath);
+				this.sourceGlobal = true;
+			}
+			if (target === enyo.global) {
+				// if this is also a one-way binding we have a special need to reduce the path
+				// by one more when retrieving the base target so we can attempt to register an observer
+				// as expected for changes on the last base object in the chain prior to the
+				// final property
+				tp                    = this.targetPath.split(".");
+				this.targetGlobalPath = tp.slice(0,-1).join(".");
+				this.targetPath       = tp.pop();
+				this.target           = enyo.getPath(this.targetGlobalPath);
+				this.targetGlobal     = true;
+			}
+			return this;
+		},
+		connectSource: function () {
+				// the actual source/root object we need to connect to, without this reference
+				// or a starting place, we cannot connect
+			var source = this.source,
+				// the path from the root object leading to the final property (which we will
+				// be registering for)
+				path   = this.sourceGlobal? this.sourceProp: this.sourcePath,
+				// the observer we need to register
+				fn     = this.sourceObserver,
+				id     = this.sourceObserverId || (this.sourceObserverId=enyo.uid("__bindingObserver__"));
+			// if we were searching from a global path but originally didn't find the source it
+			// will be enyo.global and we need to try and find it again
+			if (source === enyo.global) {
+				source = this.resolve().source;
+			}
+			if (source && source.addObserver && !this.sourceConnected) {
+				if (!fn) {
+					fn = this.sourceObserver = enyo.bindSafely(this, this.syncFromSource);
+					fn.binding     = this;
+					fn.bindingProp = "source";
+				}
+				this.sourceConnected = true;
+				this.sourceObserver  = source.addObserver(path, fn, null, id);
+			} else {
+				this.sourceConnected = false;
+			}
+		},
+		connectTarget: function () {
+				// the actual target/root object we need to connect to, without this reference
+				// or a starting place, we cannot connect
+			var target = this.target,
+				// the path from the root object leading to the final property (which we will
+				// be registering for)
+				path   = this.targetGlobal? this.targetProp: this.targetPath,
+				// the observer we need to register
+				fn     = this.targetObserver,
+				id     = this.targetObserverId || (this.targetObserverId=enyo.uid("__bindingObserver__"));
+			if (target === enyo.global) {
+				target = this.resolve().target;
+			}
+			if (target && target.addObserver && !this.targetConnected) {
+				if (!fn && path) {
+					fn = this.targetObserver = enyo.bindSafely(this, this.syncFromTarget);
+					fn.binding     = this;
+					fn.bindingProp = "target";
+				}
+				this.targetConnected = true;
+				if (path) {
+					this.targetObserver  = target.addObserver(path, fn, null, id);
+				} else {
+					this.registered("target", this.target);
+				}
+			} else {                      
+				this.targetConnected = false;
+			}
+		},
+		disconnectSource: function () {
+			if (this.source && this.sourceConnected) {
+					// the actual source/root object we need to connect to, without this reference
+					// or a starting place, we cannot connect
+				var source = this.source,
+					// the observer we need to register
+					fn     = this.sourceObserver,
+					id     = this.sourceObserverId,
+					_omap  = enyo._observerMap[source.objectObserverId],
+					_e     = _omap && _omap[id];
+				if (_e) {
+					if (source && source.addObserver && this.sourceConnected) {
+						if (fn) {
+							source.removeObserver(_e.observerProp, fn);
+						}
+					}
 				}
 			}
-			this.disconnectSource();
-			this.setSourceValue(value);
-			this.connectSource();
-		},
-
-		//*@protected
-		disconnectSource: function () {
-			var source = this.source;
-			var property = this._source_property;
-			var fn = this._source_responder;
-			if (!enyo.exists(source)) {
-				return;
-			}
-			source.removeObserver(property, fn);
+			this.sourceObserver  = null;
 			this.sourceConnected = false;
 		},
-
-		//*@protected
 		disconnectTarget: function () {
-			var target = this.target;
-			var fn = this._target_responder;
-			var property = this._target_property;
-			if (!enyo.exists(target)) {
-				return;
+			if (this.target && this.targetConnected) {
+					// the actual target/root object we need to connect to, without this reference
+					// or a starting place, we cannot connect
+				var target = this.target,
+					// the observer we need to register
+					fn     = this.targetObserver,
+					id     = this.targetObserverId,
+					_omap  = enyo._observerMap[target.objectObserverId],
+					_e     = _omap && _omap[id];
+				if (_e) {
+					if (target && target.addObserver && this.targetConnected) {
+						if (fn) {
+							target.removeObserver(_e.observerProp, fn);
+						}
+					}
+				}
 			}
-			if ("function" === typeof fn) {
-				target.removeObserver(property, fn);
-			}
+			this.targetObserver  = null;
 			this.targetConnected = false;
 		},
-
-		//*@protected
-		setSourceValue: function (value) {
-			var source = this.source;
-			var property = this._source_property;
-			var force = !_force_regex.test(typeof value);
-			source.set(property, value, force);
-		},
-
-		//*@protected
-		setTargetValue: function (value) {
-			var target = this.target;
-			var property = this._target_property;
-			var force = !_force_regex.test(typeof value);
-			target.set(property, value, force);
-		},
-
-		//*@protected
+		/**
+			Retrieving the values actually requires for the ends to have completely
+			registered. This ensures we don't have invalid values propagated and/or extra
+			work being done too early.
+		*/
 		getSourceValue: function () {
-			var source = this.source;
-			var property = this._source_property;
-			return source.get(property);
+			var source = this.registeredSource;
+			if (source) {
+				return source.get(this.sourceProp);
+			}
 		},
-
-		//*@protected
 		getTargetValue: function () {
-			var target = this.target;
-			var property = this._target_property;
-			return target.get(property);
-		},
-
-		//*@protected
-		setupTransform: function () {
-			var transform = this.transform;
-			var owner = this.owner || {};
-			// if it is a string we try and locate it on the owner
-			// or as a global method
-			if ("string" === typeof transform) {
-				transform = owner[transform] || enyo.getPath.call(owner, transform)
-					|| enyo.getPath.call(enyo.global, transform);
-			}
-			// if we couldn't find anything go ahead and setup a default
-			// to simply return the value
-			if ("function" !== typeof transform) {
-				transform = this.transform = function(value) {
-					return value;
-				};
-			}
-			if (!(transform instanceof Transform)) {
-				this.transform = new Transform(transform, this);
+			var target = this.registeredTarget;
+			if (target) {
+				return target.get(this.targetProp);
 			}
 		},
-
+		setSourceValue: function (value) {
+			var source = this.registeredSource;
+			if (source) {
+				if (source.destroyed) {
+					this.destroy();
+					return;
+				}
+				source.set(this.sourceProp, value, !_force.test(typeof value));
+			}
+		},
+		setTargetValue: function (value) {
+			var target = this.registeredTarget;
+			if (target) {
+				if (target.destroyed) {
+					this.destroy();
+					return;
+				}
+				target.set(this.targetProp, value, !_force.test(typeof value));
+			}
+		},
 		//*@public
 		/**
-			Call this method to prepare this object to be
-			cleaned up by the garbage collector.
+			Connects the ends (i.e., the _source_ and _target_) of the binding. While
+			you typically won't need to call this method, it is safe to call even when
+			the ends are already established. Note that if one or both of the ends
+			does become connected and the _autoSync_ flag is true, the ends will
+			automatically be synchronized. Returns a reference to the binding.
+		*/
+		connect: function () {
+			var c = this.isConnected();
+			if (!c) {
+				this.connecting = true;
+				if (!this.sourceConnected) {
+					this.connectSource();
+				}
+				if (!this.targetConnected) {
+					this.connectTarget();
+				}
+				this.connecting = false;
+				this.isConnected();
+			}
+			if (this.connected && !c && this.autoSync) {
+				this.sync();
+			}
+			return this;
+		},
+		/**
+			Synchronizes values from the _source_ to the _target_. This usually will
+			not need to be called manually. Two-way bindings will automatically
+			synchronize from the _target_ end once they are connected. Returns a reference
+			to the binding.
+		*/
+		sync: function () {
+			if (!this.connecting) {
+				this.syncFromSource();
+			}
+			return this;
+		},
+		/**
+			Disconnects from the ends (i.e., _source_ and _target_) if a connection
+			exists at either end. This method will most likely not need to be called
+			directly. Returns a reference to the binding.
+		*/
+		disconnect: function () {
+			this.disconnectSource();
+			this.disconnectTarget();
+			this.isConnected();
+			return this;
+		},
+		/**
+			Refreshes the binding, only rebuilding the parts that are missing. Will
+			synchronize if it is able to connect and the _autoSync_ flag is true. Returns
+			a reference to the binding.
+		*/
+		refresh: function () {
+			this.resolve();
+			if (this.autoConnect) {
+				this.connect();
+			}
+			return this;
+		},
+		/**
+			Resets all properties to their original state. Returns a reference to the
+			binding.
+		*/
+		reset: function () {
+			this.disconnect();
+			enyo.mixin(this, this.originals);
+			this.building         = true;
+			this.sourceRegistered = false;
+			this.targetRegistered = false;
+			this.registeredSource = null;
+			this.registeredTarget = null;
+			return this;
+		},
+		/**
+			Rebuilds the entire binding. Will synchronize if it is able to connect and
+			the _autoSync_ flag is true. Returns a reference to the binding.
+		*/
+		rebuild: function () {
+			return this.reset().refresh();
+		},
+		/**
+			Releases all of the binding's parts and unregisters its observers.
+			Typically, this method will not need to be called directly unless the
+			binding was created without an owner.
 		*/
 		destroy: function () {
-			if (true === this.destroyed) {
-				return;
-			}
-			// we set this right away so that we don't wind up
-			// in an infinite loop
-			this.destroyed = true;
 			this.disconnect();
-			this.source = null;
-			this.target = null;
-			this._source_responder = null;
-			this._target_responder = null;
-			enyo.Binding.bindingCount--;
-			if (this.transform) {
-				this.transform.destroy();
-				this.transform = null;
-			}
+			this.destroyed        = true;
+			this.source           = null;
+			this.target           = null;
+			this.registeredSource = null;
+			this.registeredTarget = null;
+			this.sourceObserver   = null;
+			this.targetObserver   = null;
+			this.transform        = null;
+			this.originals        = null;
 			if (this.owner) {
 				this.owner.removeBinding(this);
+				this.owner = null;
 			}
-			// make sure to unregister the binding reference
-			unregister(this);
+			delete _bindingMap[this.id];
+			enyo.BindingCount--;
 		},
-
 		//*@protected
-		constructor: function () {
-			var idx = 0;
-			var len = arguments.length;
-			var oneWay;
-			var twoWay;
-			// increment our binding counter for debugging purposes
-			count++;
-			// take any properties that were passed in and apply them
-			// to this binding instance
-			for (; idx < len; ++idx) {
-				enyo.mixin(this, arguments[idx]);
+		initTransform: function () {
+			var tf = this.transform,
+				o  = this.owner,
+				bo = o? o.bindingTransformOwner: null;
+			if (tf && enyo.isString(tf)) {
+				// test first against the common case which is that it is on the
+				// transform owner or the actual owner
+				if (bo || o) {
+					tf = enyo.getPath.call(bo || o, this.transform);
+					// worst case here is to check if there was a bo and that failed if there is an
+					// owner go ahead and check that too
+					if (!tf && bo && o) {
+						tf = enyo.getPath.call(o, this.transform);
+					}
+				}
+				// only if that fails to we attempt to find the global
+				if (!tf) { tf = enyo.getPath(this.transform); }
 			}
-			// generate a new id for this binding
-			this.id = enyo.uid("binding");
-			// we need to make sure the binding's setup understands if
-			// this is a one-way or two-way binding
-			oneWay = this.oneWay;
-			twoWay = this.twoWay;
-			// regardless of what the oneWay flag is set to, priority
-			// resolution defers to the twoWay flag initially
-			if (true === twoWay) {
-				this.oneWay = false;
-			}
-			// now we check our deferred flag to see if this is a two-way
-			// binding having been set via the oneWay flag
-			else if (false === oneWay) {
-				this.twoWay = true;
-			}
-			// run our initialization routines
-			setup.call(this);
+			this.transform = enyo.isFunction(tf)? tf: null;
 		}
-
-		// ...........................
-		// OBSERVERS
-
 	});
+	/**
+		Use this framework property to control the default kind of binding to use
+		for all kinds. It may be overridden at the kind level by setting the
+		_defaultBindingKind_ property to a different kind of binding.
+	*/
+	enyo.defaultBindingKind = enyo.Binding;
 
-}());
+})(enyo);

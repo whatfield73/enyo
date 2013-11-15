@@ -11,12 +11,12 @@
 	encounters an error.
 
 	More information on _Async_ and its usage is available in the documentation	on
-	<a href="https://github.com/enyojs/enyo/wiki/Consuming-Web-Services">Consuming Web Services</a>
+	[Consuming Web Services](building-apps/managing-data/consuming-web-services.html)
 	in the Enyo Developer Guide.
 */
 enyo.kind({
 	name: "enyo.Async",
-	kind: enyo.Object,
+	kind: "enyo.Object",
 	published: {
 		/**
 			If set to a non-zero value, the number of milliseconds to
@@ -27,11 +27,23 @@ enyo.kind({
 	//* @protected
 	failed: false,
 	context: null,
-	constructor: function() {
-		this.responders = [];
-		this.errorHandlers = [];
-		this.progressHandlers = [];
-	},
+	constructor: enyo.inherit(function (sup) {
+		return function() {
+			sup.apply(this, arguments);
+			this.responders = [];
+			this.errorHandlers = [];
+			this.progressHandlers = [];
+		};
+	}),
+	destroy: enyo.inherit(function (sup) {
+		return function() {
+			if (this.timeoutJob) {
+				this.clearTimeout();
+			}
+			sup.apply(this, arguments);
+		};
+	}),
+
 	accumulate: function(inArray, inMethodArgs) {
 		var fn = (inMethodArgs.length < 2) ? inMethodArgs[0] : enyo.bind(inMethodArgs[0], inMethodArgs[1]);
 		inArray.push(fn);
@@ -141,12 +153,12 @@ enyo.kind({
 		for (var i = 0; i < this.progressHandlers.length; i++) {
 			enyo.call(this.context || this, this.progressHandlers[i], [this, event]);
 		}
-  },
+	},
 	//* Starts the async activity. Overridden in subkinds.
 	go: function(inValue) {
 		this.sendProgress(0, 0, 1);
 		enyo.asyncMethod(this, function() {
-    	this.sendProgress(1, 0, 1);
+			this.sendProgress(1, 0, 1);
 			this.respond(inValue);
 		});
 		return this;

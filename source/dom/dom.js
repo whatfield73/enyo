@@ -112,12 +112,9 @@ enyo.dom = {
 	applyBodyFit: function() {
 		var h = this.getFirstElementByTagName("html");
 		if (h) {
-			h.className += " enyo-document-fit";
+			this.addClass(h, "enyo-document-fit");
 		}
-		var b = this.getFirstElementByTagName("body");
-		if (b) {
-			b.className += " enyo-body-fit";
-		}
+		enyo.dom.addBodyClass("enyo-body-fit");
 		enyo.bodyIsFitting = true;
 	},
 	getWindowWidth: function() {
@@ -189,7 +186,7 @@ enyo.dom = {
 	_pxMatch: /px/i,
 	getComputedBoxValue: function(inNode, inProp, inBoundary, inComputedStyle) {
 		var s = inComputedStyle || this.getComputedStyle(inNode);
-		if (s) {
+		if (s && (!enyo.platform.ie || enyo.platform.ie >= 9)) {
 			var p = s.getPropertyValue(inProp + "-" + inBoundary);
 			return p === "auto" ? 0 : parseInt(p, 10);
 		} else if (inNode && inNode.currentStyle) {
@@ -300,10 +297,80 @@ enyo.dom = {
 			'width': width
 		};
 	},
-	//* use to modify innerHTML in a manner that's safe for Win8 applications
 	setInnerHtml: function(node, html) {
-		enyo.execUnsafeLocalFunction(function() {
+		node.innerHTML = html;
+	},
+	//* check a DOM node for a specific CSS class
+	hasClass: function(node, s) {
+		if (!node || !node.className) { return; }
+		return (' ' + node.className + ' ').indexOf(' ' + s + ' ') >= 0;
+	},
+	//* uniquely add a CSS class to a DOM node
+	addClass: function(node, s) {
+		if (node && !this.hasClass(node, s)) {
+			var ss = node.className;
+			node.className = (ss + (ss ? ' ' : '') + s);
+		}
+	},
+	//* remove a CSS class from a DOM node if it exists
+	removeClass: function(node, s) {
+		if (node && this.hasClass(node, s)) {
+			var ss = node.className;
+			node.className = (' ' + ss + ' ').replace(' ' + s + ' ', ' ').slice(1, -1);
+		}
+	},
+	//*@public
+	//* add a class to document.body. This defers the actual class change
+	//* if nothing has been rendered into body yet.
+	addBodyClass: function(s) {
+		if (!enyo.exists(enyo.roots)) {
+			if (enyo.dom._bodyClasses) {
+				enyo.dom._bodyClasses.push(s);
+			} else {
+				enyo.dom._bodyClasses = [s];
+			}
+		}
+		else {
+			enyo.dom.addClass(document.body, s);
+		}
+	},
+	//*@protected
+	flushBodyClasses: function() {
+		if (enyo.dom._bodyClasses) {
+			for (var i = 0, c; (c=enyo.dom._bodyClasses[i]); ++i) {
+				enyo.dom.addClass(document.body, c);
+			}
+			enyo.dom._bodyClasses = null;
+		}
+	},
+	//*@protected
+	_bodyClasses: null
+};
+
+// override setInnerHtml for Windows 8 HTML applications
+if (typeof window.MSApp !== "undefined") {
+	enyo.dom.setInnerHtml = function(node, html) {
+		window.MSApp.execUnsafeLocalFunction(function() {
 			node.innerHTML = html;
 		});
-	}
-};
+	};
+}
+
+// use faster classList interface if it exists
+if (document.head && document.head.classList) {
+	enyo.dom.hasClass = function(node, s) {
+		if (node) {
+			return node.classList.contains(s);
+		}
+	};
+	enyo.dom.addClass = function(node, s) {
+		if (node) {
+			return node.classList.add(s);
+		}
+	};
+	enyo.dom.removeClass = function (node, s) {
+		if (node) {
+			return node.classList.remove(s);
+		}
+	};
+}

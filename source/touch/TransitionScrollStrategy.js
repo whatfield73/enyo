@@ -1,12 +1,12 @@
 /**
 	_enyo.TransitionScrollStrategy_ is a helper kind that extends
-	<a href="#enyo.TouchScrollStrategy">enyo.TouchScrollStrategy</a>, optimizing
-	it for scrolling environments in which effecting scroll changes with
-	transforms using CSS transitions is fastest.
+	[enyo.TouchScrollStrategy](#enyo.TouchScrollStrategy), optimizing it for
+	scrolling environments in which effecting scroll changes with transforms using
+	CSS transitions is fastest.
 
 	_enyo.TransitionScrollStrategy_ is not typically created in application code.
-	Instead, it is specified as the value of the `strategyKind` property of an
-	`enyo.Scroller` or <a href="#enyo.List">enyo.List</a>, or is used by the
+	Instead, it is specified as the value of the _strategyKind_ property of an
+	[enyo.Scroller](#enyo.Scroller) or [enyo.List](#enyo.List), or is used by the
 	framework implicitly.
 */
 enyo.kind({
@@ -110,14 +110,18 @@ enyo.kind({
 	//* @protected
 
 	// apply initial transform so we're always composited
-	create: function() {
-		this.inherited(arguments);
-		enyo.dom.transformValue(this.$.client, this.translation, "0,0,0");
-	},
-	destroy: function() {
-		this.clearCSSTransitionInterval();
-		this.inherited(arguments);
-	},
+	create: enyo.inherit(function (sup) {
+		return function() {
+			sup.apply(this, arguments);
+			enyo.dom.transformValue(this.$.client, this.translation, "0,0,0");
+		};
+	}),
+	destroy: enyo.inherit(function (sup) {
+		return function() {
+			this.clearCSSTransitionInterval();
+			sup.apply(this, arguments);
+		};
+	}),
 	getScrollSize: function() {
 		var n = this.$.client.hasNode();
 		return {width: n ? n.scrollWidth : 0, height: n ? n.scrollHeight : 0};
@@ -130,6 +134,12 @@ enyo.kind({
 	verticalChanged: function() {
 		if(this.vertical == "hidden") {
 			this.scrollVertical = false;
+		}
+	},
+	intervalChanged: function() {
+		// TODO: Implement variable speed implementation
+		if (this.interval != enyo.TransitionScrollStrategy.prototype.interval) {
+			this.warn("'interval' not implemented in TransitionScrollStrategy");
 		}
 	},
 	calcScrollNode: function() {
@@ -202,7 +212,7 @@ enyo.kind({
 		}
 	},
 	// Update thumbs, recalculate boundaries, and bubble scroll event
-	scroll: function(inSender, inEvent) {
+	scroll: function() {
 		if(this.thumb) {
 			this.updateThumbs();
 		}
@@ -252,7 +262,7 @@ enyo.kind({
 	},
 	// On touch, stop transition by setting transform values to current computed style, and
 	// changing transition time to 0s. TODO
-	down: function(inSender, inEvent) {
+	down: function() {
 		var _this = this;
 		if (this.isScrolling() && !this.isOverscrolling()) {
 			this.stopTimeout = setTimeout(function() {

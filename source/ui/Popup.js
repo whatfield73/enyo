@@ -13,8 +13,7 @@
 	appropriate when the popup does not need to scroll along with other content.
 
 	For more information, see the documentation on
-	[Popups](https://github.com/enyojs/enyo/wiki/Popups) in the Enyo Developer
-	Guide.
+	[Popups](building-apps/controls/popups.html) in the Enyo Developer Guide.
  */
 enyo.kind({
 	name: "enyo.Popup",
@@ -31,7 +30,10 @@ enyo.kind({
 		//* shown on top of other controls.
 		floating: false,
 		//* Set to true to automatically center the popup in the middle of the viewport
-		centered: false
+		centered: false,
+		//* Set to true to be able to show transition on the style modifications otherwise
+		//* the transition is invisible (visibility: hidden)
+		showTransitions: false
 	},
 	//* @protected
 	showing: false,
@@ -56,30 +58,38 @@ enyo.kind({
 	tools: [
 		{kind: "Signals", onKeydown: "keydown"}
 	],
-	create: function() {
-		this.inherited(arguments);
-		this.canGenerate = !this.floating;
-	},
-	render: function() {
-		if (this.floating) {
-			if (!enyo.floatingLayer.hasNode()) {
-				enyo.floatingLayer.render();
+	create: enyo.inherit(function (sup) {
+		return function() {
+			sup.apply(this, arguments);
+			this.canGenerate = !this.floating;
+		};
+	}),
+	render: enyo.inherit(function (sup) {
+		return function() {
+			if (this.floating) {
+				if (!enyo.floatingLayer.hasNode()) {
+					enyo.floatingLayer.render();
+				}
+				this.parentNode = enyo.floatingLayer.hasNode();
 			}
-			this.parentNode = enyo.floatingLayer.hasNode();
-		}
-		this.inherited(arguments);
-	},
-	destroy: function() {
-		if (this.showing) {
-			this.release();
-		}
-		this.inherited(arguments);
-	},
+			sup.apply(this, arguments);
+		};
+	}),
+	destroy: enyo.inherit(function (sup) {
+		return function() {
+			if (this.showing) {
+				this.release();
+			}
+			sup.apply(this, arguments);
+		};
+	}),
 
-	reflow: function() {
-		this.updatePosition();
-		this.inherited(arguments);
-	},
+	reflow: enyo.inherit(function (sup) {
+		return function() {
+			this.updatePosition();
+			sup.apply(this, arguments);
+		};
+	}),
 	calcViewportSize: function() {
 		if (window.innerWidth) {
 			return {
@@ -160,36 +170,40 @@ enyo.kind({
 			this.addStyles( "top: " + Math.max( ( ( d.height - b.height ) / 2 ), 0 ) + "px; left: " + Math.max( ( ( d.width - b.width ) / 2 ), 0 ) + "px;" );
 		}
 	},
-	showingChanged: function() {
-		// auto render when shown.
-		if (this.floating && this.showing && !this.hasNode()) {
-			this.render();
-		}
-		// hide while sizing, and move to top corner for accurate sizing
-		if (this.centered || this.targetPosition) {
-			this.applyStyle("visibility", "hidden");
-			this.addStyles("top: 0px; left: 0px; right: initial; bottom: initial;");
-		}
-		this.inherited(arguments);
-		if (this.showing) {
-			this.resized();
-			if (this.captureEvents) {
-				this.capture();
+	showingChanged: enyo.inherit(function (sup) {
+		return function() {
+			// auto render when shown.
+			if (this.floating && this.showing && !this.hasNode()) {
+				this.render();
 			}
-		} else {
-			if (this.captureEvents) {
-				this.release();
+			// hide while sizing, and move to top corner for accurate sizing
+			if (this.centered || this.targetPosition) {
+				if (!this.showTransitions) {
+					this.applyStyle("visibility", "hidden");
+				}
+				this.addStyles("top: 0px; left: 0px; right: initial; bottom: initial;");
 			}
-		}
-		// show after sizing
-		if (this.centered || this.targetPosition) {
-			this.applyStyle("visibility", null);
-		}
-		// events desired due to programmatic show/hide
-		if (this.hasNode()) {
-			this[this.showing ? "doShow" : "doHide"]();
-		}
-	},
+			sup.apply(this, arguments);
+			if (this.showing) {
+				this.resized();
+				if (this.captureEvents) {
+					this.capture();
+				}
+			} else {
+				if (this.captureEvents) {
+					this.release();
+				}
+			}
+			// show after sizing
+			if (this.centered || this.targetPosition && !this.showTransitions) {
+				this.applyStyle("visibility", null);
+			}
+			// events desired due to programmatic show/hide
+			if (this.hasNode()) {
+				this[this.showing ? "doShow" : "doHide"]();
+			}
+		};
+	}),
 	capture: function() {
 		enyo.dispatcher.capture(this, !this.modal);
 	},
@@ -246,11 +260,11 @@ enyo.kind({
 			}
 		}
 	},
-	requestShow: function(inSender, inEvent) {
+	requestShow: function() {
 		this.show();
 		return true;
 	},
-	requestHide: function(inSender, inEvent) {
+	requestHide: function() {
 		this.hide();
 		return true;
 	},

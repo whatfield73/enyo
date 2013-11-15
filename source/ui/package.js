@@ -1,5 +1,6 @@
 enyo.depends(
 	"ui.css",
+	"Anchor.js",
 	"Animator.js",
 	"BaseLayout.js",
 	"Image.js",
@@ -19,5 +20,9 @@ enyo.depends(
 	"Selection.js",
 	"Drawer.js",
 	"Table.js",
+	"fullscreen.js",
+	"Media.js",
+	"Audio.js",
+	"Video.js",
 	"data"
 );

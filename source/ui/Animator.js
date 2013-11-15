@@ -15,6 +15,9 @@
 	function will be used to handle the event directly, without sending the
 	event to its owner or bubbling it.  The _context_ property can be used to
 	call the supplied event functions in a particular "this" context.
+
+	During animation, an <a href="#enyo.jobs">enyo.jobs</a> priority of 5 is
+	registered to defer low priority tasks.
 */
 enyo.kind({
 	name: "enyo.Animator",
@@ -42,14 +45,18 @@ enyo.kind({
 		onStop: ""
 	},
 	//* @protected
-	constructed: function() {
-		this.inherited(arguments);
-		this._next = this.bindSafely("next");
-	},
-	destroy: function() {
-		this.stop();
-		this.inherited(arguments);
-	},
+	constructed: enyo.inherit(function (sup) {
+		return function() {
+			sup.apply(this, arguments);
+			this._next = this.bindSafely("next");
+		};
+	}),
+	destroy: enyo.inherit(function (sup) {
+		return function() {
+			this.stop();
+			sup.apply(this, arguments);
+		};
+	}),
 	//* @public
 	//* Plays the animation.
 	//* For convenience, _inProps_ will be mixed directly into this object.
@@ -61,6 +68,10 @@ enyo.kind({
 		}
 		this.t0 = this.t1 = enyo.now();
 		this.value = this.startValue;
+
+		// register this jobPriority to block less urgent tasks from executing
+		enyo.jobs.registerPriority(5, this.id);
+
 		this.job = true;
 		this.next();
 		return this;
@@ -100,6 +111,9 @@ enyo.kind({
 		enyo.cancelRequestAnimationFrame(this.job);
 		this.node = null;
 		this.job = null;
+
+		// unblock job queue
+		enyo.jobs.unregisterPriority(this.id);
 	},
 	shouldEnd: function() {
 		return (this.dt >= this.duration);
@@ -108,20 +122,22 @@ enyo.kind({
 		this.t1 = enyo.now();
 		this.dt = this.t1 - this.t0;
 		var args = this.easingFunction.length;
+		var f;
 
 		if (args === 1) {
 			// time independent
-			var f = this.fraction = enyo.easedLerp(this.t0, this.duration, this.easingFunction, this.reversed);
+			f = this.fraction = enyo.easedLerp(this.t0, this.duration, this.easingFunction, this.reversed);
 			this.value = this.startValue + f * (this.endValue - this.startValue);
 		} else {
-			this.value = enyo.easedComplexLerp(this.t0, this.duration, this.easingFunction, this.reversed, this.dt, this.startValue, (this.endValue - this.startValue));
+			this.value = enyo.easedComplexLerp(this.t0, this.duration, this.easingFunction, this.reversed,
+				this.dt, this.startValue, (this.endValue - this.startValue));
 		}
 		if (((f >= 1) && (args === 1)) || this.shouldEnd()) {
 			this.value = this.endValue;
 			this.fraction = 1;
 			this.fire("onStep");
-			this.fire("onEnd");
 			this.cancel();
+			this.fire("onEnd");
 		} else {
 			this.fire("onStep");
 			this.requestNext();

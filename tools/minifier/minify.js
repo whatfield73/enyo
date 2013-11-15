@@ -20,13 +20,18 @@
 
 	function printUsage() {
 		w("Enyo 2.0 Minifier");
+		w("Usage: " + __filename + " [Flags] [path/to/package.js]");
 		w("Flags:");
 		w("-no-less:", "Don't compile less; instad substitute css for less");
 		w("-no-alias:", "Don't use path macros");
 		w("-alias:", "Give paths a macroized alias");
-		w("-enyo ENYOPATH:", "Path to enyo loader (enyo/enyo.js)");
-		w("-output PATH/NAME:", "name of output file, prepend folder paths to change output directory");
-		w("--beautify:", "Output pretty version that's less compressed but has code on separate lines");
+		w("-enyo ENYOPATH:", "Relative path to enyo folder (enyo)");
+		w("-lib LIBPATH:", "Relative path to lib folder ($enyo/../lib)");
+		w("-destdir DESTDIR:", "Target directory, prepended to any output file but skipped within generated files (current dir)");
+		w("-output RELPATH/PREFIX:", "Folder + output file prefix, relative to DESTDIR (build/out)");
+		w("-beautify:", "Output pretty version that's less compressed but has code on separate lines");
+		w("-f", "Remote source mapping: from local path");
+		w("-t", "Remote source mapping: to remote path");
 		w("-h, -?, -help:", "Show this message");
 	}
 
@@ -36,18 +41,7 @@
 		return inPath.split(sep);
 	}
 
-	function buildPathBlock(loader) {
-		var p$ = [];
-		for (var i=0, p; (p=loader.packages[i]); i++) {
-			if (p.name.indexOf("-") == -1) {
-				p$.push(p.name + ': "' + p.folder + '"');
-			}
-		}
-		p = p$.join(', ');
-		return !p ? "" : "// minifier: path aliases\nenyo.path.addPaths({" + p + "});\n";
-	}
-
-	function concatCss(loader, doneCB) {
+	function concatCss(sheets, doneCB) {
 		w("");
 		var blob = "";
 		var addToBlob = function(sheet, code) {
@@ -56,6 +50,12 @@
 				// find the url path, ignore quotes in url string
 				var matches = /url\s*\(\s*(('([^']*)')|("([^"]*)")|([^'"]*))\s*\)/.exec(inMatch);
 				var urlPath = matches[3] || matches[5] || matches[6];
+				
+				// handle the case url('') or url("").
+				if(!urlPath){
+					return "url()";
+				}
+				
 				// skip data urls
 				if (/^data:/.test(urlPath)) {
 					return "url(" + urlPath + ")";
@@ -64,20 +64,22 @@
 				if (/^http(:?s)?:/.test(urlPath)) {
 					return "url(" + urlPath + ")";
 				}
-				// get absolute path to referenced asset
-				var normalizedUrlPath = path.join(sheet, "..", urlPath);
-				// Make relative asset path to built css
-				var relPath = path.relative(path.dirname(opt.output || "build"), normalizedUrlPath);
+				// Make relative asset path from 'top-of-the-tree/build'
+				var relPath = path.join("..", opt.relsrcdir, path.dirname(sheet), urlPath);
 				if (process.platform == "win32") {
 					relPath = pathSplit(relPath).join("/");
 				}
+				console.log("opt.relsrcdir:", opt.relsrcdir);
+				console.log("sheet:", sheet);
+				console.log("urlPath:", urlPath);
+				console.log("relPath:", relPath);
 				return "url(" + relPath + ")";
 			});
-			blob += "\n/* " + sheet + " */\n\n" + code + "\n";
+			blob += "\n/* " + path.relative(process.cwd(), sheet) + " */\n\n" + code + "\n";
 		};
 		// Pops one sheet off the sheets[] array, reads (and parses if less), and then
 		// recurses again from the async callback until no sheets left, then calls doneCB
-		function readAndParse(sheets) {
+		function readAndParse() {
 			var sheet = sheets.shift();
 			if (sheet) {
 				w(sheet);
@@ -106,24 +108,15 @@
 				doneCB(blob);
 			}
 		}
-		readAndParse(loader.sheets);
+		readAndParse();
 	}
 
-	var concatJs = function(loader) {
+	var concatJs = function(loader, scripts) {
 		w("");
 		var blob = "";
-		for (var i=0, m; (m=loader.modules[i]); i++) {
-			if (typeof opt.alias === 'undefined' || opt.alias) {
-				w("* inserting path aliases");
-				blob += buildPathBlock(loader);
-				opt.alias = false;
-			}
-			w(m.path);
-			blob += "\n// " + m.rawPath + "\n" + compressJsFile(m.path) + "\n";
-			if (opt.alias == m.rawPath) {
-				w("* inserting path aliases");
-				blob += buildPathBlock(loader);
-			}
+		for (var i=0, script; (script=scripts[i]); i++) {
+			w(script);
+			blob += "\n// " + path.relative(process.cwd(), script) + "\n" + compressJsFile(script) + "\n";
 		}
 		return blob;
 	};
@@ -142,35 +135,68 @@
 		return result.code;
 	};
 
-	var finish = function(loader) {
-		//w(loader.packages);
-		//w('');
-		//
-		var output = opt.output || "build";
-		var outfolder = path.dirname(output);
+	var walkerFinished = function(loader, chunks) {
+		var outfolder = path.dirname(path.join(opt.destdir, opt.output));
 		var exists = fs.existsSync || path.existsSync;
+		var currChunk = 1;
+		var topDepends;
 		if (outfolder != "." && !exists(outfolder)) {
 			fs.mkdirSync(outfolder);
 		}
-		// Unfortunately, less parsing is asynchronous, so concatCSS is now as well
-		concatCss(loader, function(css) {
-			if (css.length) {
-				w("");
-				fs.writeFileSync(output + ".css", css, "utf8");
+		if ((chunks.length == 1) && (typeof chunks[0] == "object")) {
+			topDepends = false;
+			currChunk = "";
+		} else {
+			topDepends = [];
+		}
+		var processNextChunk = function(done) {
+			if (chunks.length > 0) {
+				var chunk = chunks.shift();
+				if (typeof chunk == "string") {
+					topDepends.push(chunk);
+					processNextChunk(done);
+				} else {
+					concatCss(chunk.sheets, function(css) {
+						if (css.length) {
+							w("");
+							var cssFile = opt.output + currChunk + ".css";
+							fs.writeFileSync(path.join(opt.destdir, cssFile), css, "utf8");
+							if (topDepends) {
+								topDepends.push(cssFile);
+							}
+						}
+						var js = concatJs(loader, chunk.scripts);
+						if (js.length) {
+							w("");
+							var jsFile = opt.output + currChunk + ".js";
+							fs.writeFileSync(path.join(opt.destdir, jsFile), js, "utf8");
+							if (topDepends) {
+								topDepends.push(jsFile);
+							}
+						}
+						currChunk++;
+						processNextChunk(done);
+					});
+				}
+			} else {
+				done();
 			}
-			//
-			var js = concatJs(loader);
-			/*
-			if (css.length) {
-				js += "\n// " + "minifier: load css" + "\n\n";
-				js += 'enyo.machine.sheet("' + output + '.css");\n';
+		};
+		processNextChunk(function() {
+			if (topDepends) {
+				var js = "";
+				// Add path aliases to the mapped sources
+				for (var i=0; i<opt.mapfrom.length; i++) {
+					js = js + "enyo.path.addPath(\"" + opt.mapfrom[i] + "\", \"" + opt.mapto[i] + "\");\n";
+				}
+				// Override the default rule that $lib lives next to $enyo, since enyo may be remote
+				js = js + "enyo.path.addPath(\"lib\", \"lib\");\n";
+				// Add depends for all of the top-level files
+				js = js + "enyo.depends(\n\t\"" + topDepends.join("\",\n\t\"") + "\"\n);";
+				fs.writeFileSync(path.join(opt.destdir, opt.output + ".js"), js, "utf8");
+				fs.writeFileSync(path.join(opt.destdir, opt.output + ".css"), "/* CSS loaded via enyo.depends() call in " + opt.output + ".js */", "utf8");
 			}
-			*/
-			if (js.length) {
-				w("");
-				fs.writeFileSync(output + ".js", js, "utf8");
-			}
-			//
+
 			w("");
 			w("done.");
 			w("");
@@ -184,28 +210,44 @@
 
 	var knownOpts = {
 		"alias": Boolean,
-		"enyo": String,
-		"output": String,
+		"enyo": String,   // relative path
+		"lib": String,    // relative path
+		"destdir": path,  // absolute path (resolved by nopt)
+		"srcdir": path,   // absolute path (resolved by nopt)
+		"output": String, // relative path
 		"help": Boolean,
-		"beautify": Boolean
+		"beautify": Boolean,
+		"mapfrom": [String, Array],
+		"mapto": [String, Array]
 	};
 
 	var shortHands = {
 		"alias": ['--alias'],
 		"enyo": ['--enyo'],
+		"lib": ['--lib'],
+		"srcdir": ['--srcdir'],
+		"destdir": ['--destdir'],
 		"output": ['--output'],
 		"h": ['--help'],
 		"?": ['--help'],
 		"help": ['--help'],
-		"beautify": ['--beautify']
+		"beautify": ['--beautify'],
+		"f": ['--mapfrom'],
+		"t": ['--mapto']
 	};
 
 	opt = nopt(knownOpts, shortHands, process.argv, 2);
-	opt.source = opt.argv.remain[0];
-	w(opt);
-	w("");
-
-	w("");
+	opt.packagejs = opt.argv.remain[0] || "package.js";
+	opt.srcdir = opt.srcdir || process.cwd();
+	if (opt.packagejs) {
+		// walker only works from top-level package.js...
+		process.chdir(path.dirname(opt.packagejs));
+	}
+	// ...but we still want to (relatively) track the top of the
+	// tree, because this is the root from which the LESS sheets
+	// are resolved (unlike the JS dependencies, which are
+	// resolved from the folder of the top-level package.js).
+	opt.relsrcdir = path.relative(opt.srcdir, process.cwd());
 
 	if (opt.help) {
 		printUsage();
@@ -232,7 +274,14 @@
 		}
 	});
 
-	walker.init(opt.enyo);
-	walker.walk(opt.source, finish);
+	opt.destdir = opt.destdir || process.cwd();
+	opt.output = opt.output || "build/out";
+	if (path.resolve(opt.output) === opt.output) {
+		throw new Error("-output must be a relative path prefix");
+	}
+
+	w(opt);
+	walker.init(opt.enyo, opt.lib || opt.enyo + "/../lib", opt.mapfrom, opt.mapto);
+	walker.walk('package.js', walkerFinished);
 
 })();

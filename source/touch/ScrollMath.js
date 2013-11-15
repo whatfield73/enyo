@@ -7,7 +7,7 @@ _enyo.ScrollMath_ is not typically created in application code.
 */
 enyo.kind({
 	name: "enyo.ScrollMath",
-	kind: enyo.Component,
+	kind: "enyo.Component",
 	published: {
 		//* True if vertical scrolling is enabled
 		vertical: true,
@@ -60,14 +60,16 @@ enyo.kind({
 	x: 0,
 	y0: 0,
 	y: 0,
-	destroy: function() {
-		this.stop();
-		this.inherited(arguments);
-	},
+	destroy: enyo.inherit(function (sup) {
+		return function() {
+			this.stop();
+			sup.apply(this, arguments);
+		};
+	}),
 	/**
 		Simple Verlet integrator for simulating Newtonian motion.
 	*/
-	verlet: function(p) {
+	verlet: function() {
 		var x = this.x;
 		this.x += x - this.x0;
 		this.x0 = x;
@@ -195,7 +197,10 @@ enyo.kind({
 		}
 	},
 	stop: function(inFireEvent) {
-		this.job = enyo.cancelRequestAnimationFrame(this.job);
+		var job = this.job;
+		if (job) {
+			this.job = enyo.cancelRequestAnimationFrame(job);
+		}
 		if (inFireEvent) {
 			this.doScrollStop();
 		}
@@ -234,7 +239,7 @@ enyo.kind({
 			return true;
 		}
 	},
-	dragDrop: function(e) {
+	dragDrop: function() {
 		if (this.dragging && !window.PalmSystem) {
 			var kSimulatedFlickScalar = 0.5;
 			this.y = this.uy;

@@ -3,7 +3,7 @@
 */
 enyo.kind({
 	name: "enyo.Checkbox",
-	kind: enyo.Input,
+	kind: "enyo.Input",
 	classes: "enyo-checkbox",
 	events: {
 		//* Fires when checkbox is tapped.
@@ -24,16 +24,15 @@ enyo.kind({
 		onchange: "change",
 		onclick: "click"
 	},
-	create: function() {
-		this.inherited(arguments);
-	},
-	rendered: function() {
-		this.inherited(arguments);
-		if (this.active) {
-			this.activeChanged();
-		}
-		this.checkedChanged();
-	},
+	rendered: enyo.inherit(function (sup) {
+		return function() {
+			sup.apply(this, arguments);
+			if (this.active) {
+				this.activeChanged();
+			}
+			this.checkedChanged();
+		};
+	}),
 	checkedChanged: function() {
 		this.setNodeProperty("checked", this.checked);
 		this.setAttribute("checked", this.checked ? "checked" : "");

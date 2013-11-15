@@ -4,22 +4,36 @@
 	animation whose direction is determined by the _orient_ property.
 
 	For more information, see the documentation on
-	<a href="https://github.com/enyojs/enyo/wiki/Drawers">Drawers</a> in the
-	Enyo Developer Guide.
+	[Drawers](building-apps/layout/drawers.html) in the Enyo Developer Guide.
 */
 
 enyo.kind({
 	name: "enyo.Drawer",
 	published: {
 		//* The visibility state of the drawer's associated control
-		open: true,
+		open : true,
 		/**
 			Direction of the opening/closing animation--either "v" for vertical
 			or "h" for horizontal
 		*/
-		orient: "v",
+		orient : "v",
 		//* If true, the opening/closing transition will be animated
-		animated: true
+		animated : true,
+		/**
+			If true, Drawer will resize it's container as it's animating, which is useful
+			when placed inside of a FittableLayout
+		*/
+		resizeContainer: true
+	},
+	events: {
+		/**
+			Fires when the drawer has been opened or closed. The handler can determine
+			whether the drawer was just opened or just closed based on the _open_
+			property. If _this.getOpen()_ returns true, the drawer was opened; if not,
+			it was closed.
+		*/
+		onDrawerAnimationStep: "",
+		onDrawerAnimationEnd: ""
 	},
 	//* @protected
 	style: "overflow: hidden; position: relative;",
@@ -27,15 +41,19 @@ enyo.kind({
 		{kind: "Animator", onStep: "animatorStep", onEnd: "animatorEnd"},
 		{name: "client", style: "position: relative;", classes: "enyo-border-box"}
 	],
-	create: function() {
-		this.inherited(arguments);
-		this.animatedChanged();
-		this.openChanged();
-	},
-	initComponents: function() {
-		this.createChrome(this.tools);
-		this.inherited(arguments);
-	},
+	create: enyo.inherit(function (sup) {
+		return function() {
+			sup.apply(this, arguments);
+			this.animatedChanged();
+			this.openChanged();
+		};
+	}),
+	initComponents: enyo.inherit(function (sup) {
+		return function() {
+			this.createChrome(this.tools);
+			sup.apply(this, arguments);
+		};
+	}),
 	animatedChanged: function() {
 		if (!this.animated && this.hasNode() && this.$.animator.isAnimating()) {
 			this.$.animator.stop();
@@ -85,9 +103,11 @@ enyo.kind({
 			var o = (this.open ? inSender.endValue : inSender.startValue);
 			cn.style[p] = this.$.client.domStyles[p] = (inSender.value - o) + "px";
 		}
-		if (this.container) {
+		if (this.container && this.resizeContainer) {
 			this.container.resized();
 		}
+		this.doDrawerAnimationStep();
+		return true;
 	},
 	animatorEnd: function() {
 		if (!this.open) {
@@ -109,8 +129,10 @@ enyo.kind({
 				this.node.style[d] = this.domStyles[d] = null;
 			}
 		}
-		if (this.container) {
+		if (this.container && this.resizeContainer) {
 			this.container.resized();
 		}
+		this.doDrawerAnimationEnd();
+		return true;
 	}
 });

@@ -9,7 +9,7 @@
 */
 enyo.kind({
 	name: "enyo.UiComponent",
-	kind: enyo.Component,
+	kind: "enyo.Component",
 	published: {
 		//* The UiComponent that physically contains this component in the DOM
 		container: null,
@@ -41,32 +41,56 @@ enyo.kind({
 	*/
 	addBefore: undefined,
 	//* @protected
-	statics: {
+	protectedStatics: {
 		_resizeFlags: {showingOnly: true} // don't waterfall these events into hidden controls
 	},
-
-	create: function() {
-		this.controls = [];
-		this.children = [];
-		this.containerChanged();
-		this.inherited(arguments);
-		this.layoutKindChanged();
-	},
-	destroy: function() {
-		// Destroys all non-chrome controls (regardless of owner).
-		this.destroyClientControls();
-		// Removes us from our container.
-		this.setContainer(null);
-		// Destroys chrome controls owned by this.
-		this.inherited(arguments);
-	},
-	importProps: function(inProps) {
-		this.inherited(arguments);
-		if (!this.owner) {
-			//this.log("registering ownerless control [" + this.kindName + "] with enyo.master");
-			this.owner = enyo.master;
+	// TODO-POST-2.3
+	// we will go ahead and do all of this but warn that it is deprecated
+	controllerChanged: function (p) {
+		var c = this.controller;
+		if (c) {
+			if (enyo.isString(c)) {
+				this.warn(
+					"the `controller` properties special handling has been deprecated, please use " +
+					"bindings to help resolve paths as this feature will be removed"
+				);
+				c = this.controller = enyo.getPath.call(c[0] == "."? this: enyo.global, c);
+			}
 		}
 	},
+	// END-TODO-POST-2.3
+	create: enyo.inherit(function (sup) {
+		return function() {
+			this.controls = this.controls || [];
+			this.children = this.children || [];
+			this.containerChanged();
+			sup.apply(this, arguments);
+			this.layoutKindChanged();
+			// TODO-POST-2.3
+			if (this.controller) {
+				this.notifyObservers("controller", null, this.controller);
+			}
+			// END-TODO-POST-2.3
+		};
+	}),
+	destroy: enyo.inherit(function (sup) {
+		return function() {
+			// Destroys all non-chrome controls (regardless of owner).
+			this.destroyClientControls();
+			// Removes us from our container.
+			this.setContainer(null);
+			// Destroys chrome controls owned by this.
+			sup.apply(this, arguments);
+		};
+	}),
+	importProps: enyo.inherit(function (sup) {
+		return function(inProps) {
+			sup.apply(this, arguments);
+			if (!this.owner) {
+				this.owner = enyo.master;
+			}
+		};
+	}),
 	// As implemented, _controlParentName_ only works to identify an owned
 	// control created via _createComponents_ (i.e., usually in our _components_
 	// block).	To attach a _controlParent_ via other means, one must call
@@ -74,19 +98,23 @@ enyo.kind({
 	//
 	// We could call _discoverControlParent_ in _addComponent_, but it would
 	// cause a lot of useless checking.
-	createComponents: function() {
-		var results = this.inherited(arguments);
-		this.discoverControlParent();
-		return results;
-	},
+	createComponents: enyo.inherit(function (sup) {
+		return function() {
+			var results = sup.apply(this, arguments);
+			this.discoverControlParent();
+			return results;
+		};
+	}),
 	discoverControlParent: function() {
 		this.controlParent = this.$[this.controlParentName] || this.controlParent;
 	},
-	adjustComponentProps: function(inProps) {
-		// Components we create have us as a container by default.
-		inProps.container = inProps.container || this;
-		this.inherited(arguments);
-	},
+	adjustComponentProps: enyo.inherit(function (sup) {
+		return function(inProps) {
+			// Components we create have us as a container by default.
+			inProps.container = inProps.container || this;
+			sup.apply(this, arguments);
+		};
+	}),
 	// containment
 	containerChanged: function(inOldContainer) {
 		if (inOldContainer) {
@@ -280,7 +308,7 @@ enyo.kind({
 		}
 	},
 	getBubbleTarget: function() {
-		return this._bubble_target || this.parent || this.owner;
+		return this.bubbleTarget || this.parent || this.owner;
 	}
 });
 
@@ -306,7 +334,7 @@ enyo.master = new enyo.Component({
 		return '';
 	},
 	isDescendantOf: enyo.nop,
-	bubble: function(inEventName, inEvent, inSender) {
+	bubble: function(inEventName, inEvent) {
 		//enyo.log("master event: " + inEventName);
 		if (inEventName == "onresize") {
 			// Resize is special; waterfall this message.

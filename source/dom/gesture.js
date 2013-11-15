@@ -7,9 +7,8 @@
 	handle basic input differently.
 
 	For more information on normalized input events and their associated
-	properties,	see	the documentation on
-	[User Input](https://github.com/enyojs/enyo/wiki/User-Input) in the Enyo
-	Developer Guide.
+	properties,	see	the documentation on [User Input](building-apps/user-input.html)
+	in the Enyo Developer Guide.
 */
 enyo.gesture = {
 	//* @protected
@@ -17,7 +16,8 @@ enyo.gesture = {
 		"screenX", "screenY", "altKey", "ctrlKey", "metaKey", "shiftKey",
 		"detail", "identifier", "dispatchTarget", "which", "srcEvent"],
 	makeEvent: function(inType, inEvent) {
-		var e = {type: inType};
+		var e = {};
+		e.type = inType;
 		for (var i=0, p; (p=this.eventProps[i]); i++) {
 			e[p] = inEvent[p];
 		}
@@ -80,10 +80,12 @@ enyo.gesture = {
 		this.downEvent = null;
 	},
 	over: function(inEvent) {
-		enyo.dispatch(this.makeEvent("enter", inEvent));
+		var e = this.makeEvent("enter", inEvent);
+		enyo.dispatch(e);
 	},
 	out: function(inEvent) {
-		enyo.dispatch(this.makeEvent("leave", inEvent));
+		var e = this.makeEvent("leave", inEvent);
+		enyo.dispatch(e);
 	},
 	sendTap: function(inEvent) {
 		// The common ancestor for the down/up pair is the origin for the tap event

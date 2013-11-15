@@ -1,3 +1,4 @@
+/* global enyo */
 
 // TestRunner.js
 
@@ -10,22 +11,40 @@ enyo.kind({
 	name: "enyo.TestRunner",
 	kind: enyo.Control,
 	index: 0,
+	fails: 0,
+	handlers: {
+		onFinish: "checkResult"
+	},
+	checkResult: function(inSender, inEvent) {
+		if (!inEvent.results.passed) {
+			this.fails++;
+		}
+	},
 	rendered: function() {
 		this.inherited(arguments);
+		this.createComponent({name: "allTests", content: "TESTS RUNNING", classes: "enyo-tests-header-running"}).render();
 		this.next();
 	},
 	next: function() {
 		var test = enyo.TestSuite.tests[this.index++];
 		if (test) {
+			enyo.log("STARTING TEST SUITE ", test.prototype.kindName);
 			this.createComponent({name: test.prototype.kindName, kind: enyo.TestReporter, onFinishAll: "next"}).render().runTests();
+		} else {
+			if (this.fails === 0) {
+				this.$.allTests.setContent("ALL TESTS PASSED");
+				this.$.allTests.setClasses("enyo-tests-header-complete");
+			} else {
+				this.$.allTests.setContent(this.fails + " FAILURE(S)");
+				this.$.allTests.setClasses("enyo-tests-header-failed");
+			}
+			enyo.log("TEST RUNNER FINISHED");
 		}
 	}
 });
 
 // TestSuite.js
 
-/*global enyo, console
-*/
 /*
 Test Package Wish list:
 -----------------------
@@ -54,6 +73,7 @@ Jasmine style assert mechanism, so we can have fancy english text for failures
 enyo.kind({
 	name: "enyo.TestSuite",
 	kind: enyo.Component,
+	noDefer: true,
 	events: {
 		onBegin: "", // sent with test name as each test begins running.
 		onFinish: "", // sent with result as each test completes.
@@ -100,7 +120,7 @@ enyo.kind({
 	// and to make sure that lingering test code that calls finish() at a later time does not affect the state of a different test.
 	runAllTests: function() {
 		if (this.autoRunNextTest) {
-			console.error("TestSuite.runAllTests: Already running.");
+			enyo.error("TestSuite.runAllTests: Already running.");
 			return; // already running.
 		}
 		this.testNames = this.getTestNames();
@@ -164,7 +184,7 @@ enyo.kind({
 		// unless we passed previously and now we're failing.
 		// We will send multiple finish events if we get a success and then a failure -- that counts as a failure.
 		if (this.results) {
-			console.warn("Finish called more than once in test "+this.name);
+			enyo.warn("Finish called more than once in test "+this.name);
 			if (!this.results.passed || !inMessage) {
 				return;
 			}
@@ -206,6 +226,11 @@ enyo.kind({
 			this.afterEach = null; // so we don't try again
 		}
 		this.doFinish({results: this.results}); // bubble results
+		if (inMessage) {
+			enyo.log("FAILED TEST ", this.name, ": ", inMessage);
+		} else {
+			enyo.log("PASSED TEST ", this.name);
+		}
 	},
 	childTestBegun: function(inSender) {
 		// Pass child test begin event up, with the test name.
@@ -268,8 +293,10 @@ enyo.kind({
 	formatStackTrace: function(inStack) {
 		var stack = inStack.split("\n");
 		var out = [''];
-		for (var i=0, s; s=stack[i]; i++) {
-			if (s.indexOf("    at Object.do") == 0 || s.indexOf("    at Object.dispatch") == 0 || s.indexOf("TestSuite.js") != -1) {
+		for (var i=0, s; (s=stack[i]); i++) {
+			if (s.indexOf("    at Object.do") === 0 ||
+				s.indexOf("    at Object.dispatch") === 0 ||
+				s.indexOf("TestSuite.js") !== -1) {
 				continue;
 			}
 			out.push(s);
@@ -300,4 +327,8 @@ enyo.kind({
 		info.setContent(content);
 		info.setClasses("enyo-testcase-" + (results.passed ? "passed" : "failed"));
 	}
+});
+
+enyo.ready(function() {
+	new enyo.TestRunner({fit: false}).renderInto(document.body);
 });

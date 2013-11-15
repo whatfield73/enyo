@@ -16,6 +16,11 @@ enyo.xhr = {
 		- _password_: The optional password to use for authentication purposes.
 		- _xhrFields_: Optional object containing name/value pairs to mix directly into the generated xhr object.
 		- _mimeType_: Optional string to override the MIME-Type.
+
+		Note: on iOS 6, we will explicity add a "cache-control: no-cache"
+		header for any non-GET requests to workaround a system bug that caused
+		non-cachable requests to be cached. To disable this, use the _header_
+		property to specify an object where "cache-control" is set to null.
 	*/
 	request: function(inParams) {
 		var xhr = this.getXMLHttpRequest(inParams);
@@ -37,10 +42,9 @@ enyo.xhr = {
 		}
 		//
 		inParams.headers = inParams.headers || {};
-		// work around iOS 6 bug where non-GET requests are cached
+		// work around iOS 6.0 bug where non-GET requests are cached
 		// see http://www.einternals.com/blog/web-development/ios6-0-caching-ajax-post-requests
-		// not sure (yet) wether this will be required for later ios releases
-		if (method !== "GET" && enyo.platform.ios && enyo.platform.ios >= 6) {
+		if (method !== "GET" && enyo.platform.ios && enyo.platform.ios == 6) {
 			if (inParams.headers["cache-control"] !== null) {
 				inParams.headers["cache-control"] = inParams.headers['cache-control'] || "no-cache";
 			}
@@ -81,22 +85,29 @@ enyo.xhr = {
 	makeReadyStateHandler: function(inXhr, inCallback) {
 		if (window.XDomainRequest && inXhr instanceof window.XDomainRequest) {
 			inXhr.onload = function() {
-				var text;
-				if (typeof inXhr.responseText === "string") {
-					text = inXhr.responseText;
+				var data;
+				if (inXhr.responseType === "arraybuffer") {
+					data = inXhr.response;
+				} else if (typeof inXhr.responseText === "string") {
+					data = inXhr.responseText;
 				}
-				inCallback.apply(null, [text, inXhr]);
+				inCallback.apply(null, [data, inXhr]);
+				inXhr = null;
+			};
+		} else {
+			inXhr.onreadystatechange = function() {
+				if (inXhr && inXhr.readyState == 4) {
+					var data;
+					if (inXhr.responseType === "arraybuffer") {
+						data = inXhr.response;
+					} else if (typeof inXhr.responseText === "string") {
+						data = inXhr.responseText;
+					}
+					inCallback.apply(null, [data, inXhr]);
+					inXhr = null;
+				}
 			};
 		}
-		inXhr.onreadystatechange = function() {
-			if (inXhr.readyState == 4) {
-				var text;
-				if (typeof inXhr.responseText === "string") {
-					text = inXhr.responseText;
-				}
-				inCallback.apply(null, [text, inXhr]);
-			}
-		};
 	},
 	inOrigin: function(inUrl) {
 		var a = document.createElement("a"), result = false;
@@ -118,7 +129,10 @@ enyo.xhr = {
 		if (a.protocol === "file:" ||
 			a.protocol === ":" && window.location.protocol === "file:") {
 			// leave off search and hash parts of the URL
-			return a.protocol + '//' + a.host + a.pathname;
+			// and work around a bug in webOS 3 where the app's host has a domain string
+			// in it that isn't resolved as a path
+			var host = (enyo.platform.webos < 4) ? "" : a.host;
+			return a.protocol + '//' + host + a.pathname;
 		} else if (a.protocol === ":" && window.location.protocol === "x-wmapp0:") {
 			// explicitly return absolute URL for Windows Phone 8, as an absolute path is required for local files
 			return window.location.protocol + "//" + window.location.pathname.split('/')[0] + "/" + a.host + a.pathname;
