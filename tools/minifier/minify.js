@@ -50,20 +50,16 @@
 				// find the url path, ignore quotes in url string
 				var matches = /url\s*\(\s*(('([^']*)')|("([^"]*)")|([^'"]*))\s*\)/.exec(inMatch);
 				var urlPath = matches[3] || matches[5] || matches[6];
-				
+
 				// handle the case url('') or url("").
 				if(!urlPath){
 					return "url()";
 				}
-				
-				// skip data urls
-				if (/^data:/.test(urlPath)) {
-					return "url(" + urlPath + ")";
+				// skip an external url (one that starts with <protocol>: or just //, includes data:)
+				if (/^([\w-]*:)|(\/\/)/.test(urlPath)) {
+					return "url('" + urlPath + "')";
 				}
-				// skip an external link
-				if (/^http(:?s)?:/.test(urlPath)) {
-					return "url(" + urlPath + ")";
-				}
+
 				// Make relative asset path from 'top-of-the-tree/build'
 				var relPath = path.join("..", opt.relsrcdir, path.dirname(sheet), urlPath);
 				if (process.platform == "win32") {
@@ -73,7 +69,7 @@
 				console.log("sheet:", sheet);
 				console.log("urlPath:", urlPath);
 				console.log("relPath:", relPath);
-				return "url(" + relPath + ")";
+				return "url('" + relPath + "')";
 			});
 			blob += "\n/* " + path.relative(process.cwd(), sheet) + " */\n\n" + code + "\n";
 		};
@@ -91,7 +87,7 @@
 				}
 				var code = fs.readFileSync(sheet, "utf8");
 				if (isLess) {
-					var parser = new(less.Parser)({filename:sheet, paths:[path.dirname(sheet)]});
+					var parser = new(less.Parser)({filename:sheet, paths:[path.dirname(sheet)], relativeUrls:true});
 					parser.parse(code, function (err, tree) {
 						if (err) {
 							console.error(err);
@@ -160,7 +156,7 @@
 						if (css.length) {
 							w("");
 							var cssFile = opt.output + currChunk + ".css";
-							fs.writeFileSync(path.join(opt.destdir, cssFile), css, "utf8");
+							fs.writeFileSync(path.resolve(opt.destdir, cssFile), css, "utf8");
 							if (topDepends) {
 								topDepends.push(cssFile);
 							}
@@ -169,7 +165,7 @@
 						if (js.length) {
 							w("");
 							var jsFile = opt.output + currChunk + ".js";
-							fs.writeFileSync(path.join(opt.destdir, jsFile), js, "utf8");
+							fs.writeFileSync(path.resolve(opt.destdir, jsFile), js, "utf8");
 							if (topDepends) {
 								topDepends.push(jsFile);
 							}
@@ -193,8 +189,8 @@
 				js = js + "enyo.path.addPath(\"lib\", \"lib\");\n";
 				// Add depends for all of the top-level files
 				js = js + "enyo.depends(\n\t\"" + topDepends.join("\",\n\t\"") + "\"\n);";
-				fs.writeFileSync(path.join(opt.destdir, opt.output + ".js"), js, "utf8");
-				fs.writeFileSync(path.join(opt.destdir, opt.output + ".css"), "/* CSS loaded via enyo.depends() call in " + opt.output + ".js */", "utf8");
+				fs.writeFileSync(path.resolve(opt.destdir, opt.output + ".js"), js, "utf8");
+				fs.writeFileSync(path.resolve(opt.destdir, opt.output + ".css"), "/* CSS loaded via enyo.depends() call in " + opt.output + ".js */", "utf8");
 			}
 
 			w("");
@@ -282,6 +278,6 @@
 
 	w(opt);
 	walker.init(opt.enyo, opt.lib || opt.enyo + "/../lib", opt.mapfrom, opt.mapto);
-	walker.walk('package.js', walkerFinished);
+	walker.walk(path.basename(opt.packagejs), walkerFinished);
 
 })();

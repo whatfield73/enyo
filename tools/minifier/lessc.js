@@ -38,7 +38,7 @@ function finish(loader, objs, doneCB) {
 				try {
 					var css =
 						"/* WARNING: This is a generated file for backward-compatibility.  Most      */\n" +
-						"/* usrs should instead modify LESS files.  If you choose to edit this CSS   */\n" +
+						"/* users should instead modify LESS files.  If you choose to edit this CSS  */\n" +
 						"/* directly rather than LESS files, you should make sure less.xx.yy.min.js  */\n" +
 						"/* is commented out in your debug.html, and run deploy.sh/bat using the     */\n" +
 						"/* '-c' flag to disable LESS compilation.  This will force the loader and   */\n" +
@@ -64,7 +64,7 @@ function finish(loader, objs, doneCB) {
 			if (sheet.slice(-5) == ".less") {
 				w("Compiling: " + sheet);
 				code = fs.readFileSync(sheet, "utf8");
-				parser = new(less.Parser)({filename:sheet, paths:[path.dirname(sheet)]});
+				parser = new(less.Parser)({filename:sheet, paths:[path.dirname(sheet)], relativeUrls:true});
 				cssFile = sheet.slice(0,sheet.length-5) + ".css";
 				parser.parse(code, report(cssFile));
 				return;
